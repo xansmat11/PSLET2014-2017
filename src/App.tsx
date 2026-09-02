@@ -123,7 +123,7 @@ function StartScreen({
             Physical Science
           </h1>
           <p className="text-indigo-300 mt-1.5 text-base font-medium">
-            LET Reviewer · 2014–2016
+            LET Reviewer · 2014–2017
           </p>
         </div>
 
