@@ -1,0 +1,11 @@
+{
+  "title": "PSLET 2014-2016",
+  "description": "Interactive quiz platform that saves user progress and answers across sessions, enabling personalized scoring and secure data tracking for admins.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

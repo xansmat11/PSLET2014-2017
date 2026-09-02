@@ -1,8 +1,9 @@
+import { supabase } from './lib/supabase'
 import { useState, useEffect, useCallback } from 'react'
 import { questionBank, Question } from './data/questions'
 
 // ── Change this password to secure your admin panel ──────────────────────────
-const ADMIN_PASSWORD = 'pslet2024admin'
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'pslet_quiz_progress'
@@ -239,7 +240,7 @@ function QuizScreen({
   progress: Progress
   onAnswer: (qIndex: number, choice: string) => void
   onNavigate: (qIndex: number) => void
-  onSubmit: () => void
+  onSubmit: () => void | Promise<void>
 }) {
   const questions = questionBank[progress.year] || []
   const q = questions[progress.currentQ]
@@ -537,22 +538,56 @@ function ResultScreen({
 // ─── Admin Screen ─────────────────────────────────────────────────────────────
 
 function AdminScreen({ onBack }: { onBack: () => void }) {
-  const [pass, setPass] = useState('')
-  const [authed, setAuthed] = useState(false)
-  const [error, setError] = useState(false)
-  const [submissions, setSubmissions] = useState<Submission[]>([])
-  const [expanded, setExpanded] = useState<string | null>(null)
+const [email, setEmail] = useState('')
+const [pass, setPass] = useState('')
+const [authed, setAuthed] = useState(false)
+const [error, setError] = useState(false)
+const [submissions, setSubmissions] = useState<Submission[]>([])
+const [expanded, setExpanded] = useState<string | null>(null)
 
-  const tryLogin = () => {
-    if (pass === ADMIN_PASSWORD) {
-      setAuthed(true)
-      setSubmissions(loadSubmissions())
-    } else {
-      setError(true)
-      setTimeout(() => setError(false), 1500)
-    }
+const loadSupabaseSubmissions = async () => {
+  const { data, error } = await supabase
+    .from('quiz_submissions')
+    .select('*')
+    .order('submitted_at', { ascending: false })
+
+  if (error) {
+    console.error('Error loading submissions:', error)
+    setError(true)
+    return
   }
 
+  const formatted: Submission[] = (data || []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    year: row.year,
+    score: row.score,
+    total: row.total,
+    answers: row.answers,
+    submittedAt: row.submitted_at,
+  }))
+
+  setSubmissions(formatted)
+}
+
+const tryLogin = async () => {
+  setError(false)
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email: email.trim(),
+    password: pass,
+  })
+
+  if (error) {
+    console.error('Admin login error:', error)
+    setError(true)
+    setTimeout(() => setError(false), 2000)
+    return
+  }
+
+  setAuthed(true)
+  await loadSupabaseSubmissions()
+}
   if (!authed) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center px-5">
@@ -564,6 +599,16 @@ function AdminScreen({ onBack }: { onBack: () => void }) {
           <h2 className="text-white text-2xl font-bold mb-1">Admin Panel</h2>
           <p className="text-slate-500 text-sm mb-7">Enter your admin password</p>
           <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && tryLogin()}
+            placeholder="Admin email"
+            className="w-full bg-white/10 border-2 border-white/10 text-white placeholder-white/30 rounded-xl px-4 py-3.5 text-base outline-none focus:border-indigo-500 mb-3 transition-colors"
+            autoComplete="email"
+            style={{ fontSize: '16px' }}
+          />
+          <input
             type="password"
             value={pass}
             onChange={(e) => setPass(e.target.value)}
@@ -572,7 +617,11 @@ function AdminScreen({ onBack }: { onBack: () => void }) {
             className={`w-full bg-white/10 border-2 ${error ? 'border-red-500' : 'border-white/10'} text-white placeholder-white/30 rounded-xl px-4 py-3.5 text-base outline-none focus:border-indigo-500 mb-3 transition-colors`}
             style={{ fontSize: '16px' }}
           />
-          {error && <p className="text-red-400 text-sm mb-3">Incorrect password</p>}
+          {error && (
+            <p className="text-red-400 text-sm mb-3">
+              Invalid email/password or you do not have admin access.
+            </p>
+          )}
           <button
             onClick={tryLogin}
             className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl active:opacity-80"
@@ -592,7 +641,11 @@ function AdminScreen({ onBack }: { onBack: () => void }) {
             <h2 className="text-white text-xl font-bold">Admin Panel</h2>
             <p className="text-slate-400 text-xs mt-0.5">{submissions.length} submission{submissions.length !== 1 ? 's' : ''}</p>
           </div>
-          <button onClick={onBack} className="text-slate-400 text-sm py-2 px-4 bg-white/10 rounded-xl active:opacity-60">
+          <button
+              onClick={async () => {
+                await supabase.auth.signOut()
+                onBack()
+              }}>
             Exit
           </button>
         </div>
@@ -662,9 +715,9 @@ function AdminScreen({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
-          <p className="text-amber-700 text-xs font-medium">
-            ⚠️ Data stored locally on this device. Connect Supabase to access submissions from anywhere.
+        <div className="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
+          <p className="text-emerald-700 text-xs font-medium">
+            ✓ Submissions are securely stored in Supabase.
           </p>
         </div>
       </div>
@@ -737,27 +790,37 @@ export default function App() {
     })
   }, [])
 
-  const handleSubmit = useCallback(() => {
-    setProgress((prev) => {
-      if (!prev) return prev
-      const questions = questionBank[prev.year] || []
-      const score = calcScore(questions, prev.answers)
-      const submission: Submission = {
-        id: crypto.randomUUID(),
-        name: prev.name,
-        year: prev.year,
-        score,
-        total: questions.length,
-        answers: prev.answers,
-        submittedAt: new Date().toISOString(),
-      }
-      saveSubmission(submission)
-      const updated: Progress = { ...prev, submitted: true }
-      saveProgress(updated)
-      return updated
+const handleSubmit = useCallback(async () => {
+  if (!progress) return
+
+  const questions = questionBank[progress.year] || []
+  const score = calcScore(questions, progress.answers)
+
+  const { error } = await supabase
+    .from('quiz_submissions')
+    .insert({
+      name: progress.name,
+      year: progress.year,
+      score,
+      total: questions.length,
+      answers: progress.answers,
     })
-    setScreen('result')
-  }, [])
+
+  if (error) {
+    console.error('Supabase submission error:', error)
+    alert('Your submission could not be saved. Please check your internet connection and try again.')
+    return
+  }
+
+  const updated: Progress = {
+    ...progress,
+    submitted: true,
+  }
+
+  setProgress(updated)
+  saveProgress(updated)
+  setScreen('result')
+}, [progress])
 
   const handleRetake = useCallback(() => {
     setProgress((prev) => {
