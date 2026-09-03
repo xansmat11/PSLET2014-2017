@@ -1,5 +1,5 @@
 import { supabase } from './lib/supabase'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { questionBank, Question } from './data/questions'
 
 // ── Change this password to secure your admin panel ──────────────────────────
@@ -247,6 +247,16 @@ function QuizScreen({
   const [showConfirm, setShowConfirm] = useState(false)
   const answeredCount = Object.keys(progress.answers).length
   const unanswered = questions.length - answeredCount
+  const questionNavRef = useRef<HTMLDivElement>(null)
+  const currentQuestionButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Keep the current question visible in the vertical navigator.
+  useEffect(() => {
+    currentQuestionButtonRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+    })
+  }, [progress.currentQ])
 
   if (!q) return null
 
@@ -262,12 +272,49 @@ function QuizScreen({
     }
   }
 
+  // Find the next unanswered question, wrapping around if necessary.
+  const findNextUnanswered = (fromIndex: number, answers = progress.answers) => {
+    for (let offset = 1; offset <= questions.length; offset++) {
+      const index = (fromIndex + offset) % questions.length
+      if (!answers[index]) return index
+    }
+    return -1
+  }
+
+  // Selecting an answer immediately advances to the next unanswered question.
+  const handleChoice = (key: (typeof choices)[number]) => {
+    const updatedAnswers = { ...progress.answers, [progress.currentQ]: key }
+    onAnswer(progress.currentQ, key)
+
+    const nextUnanswered = findNextUnanswered(progress.currentQ, updatedAnswers)
+    if (nextUnanswered !== -1) {
+      onNavigate(nextUnanswered)
+    }
+  }
+
+  // Normal Back moves to the previous question.
+  const handleBack = () => {
+    if (progress.currentQ > 0) {
+      onNavigate(progress.currentQ - 1)
+    }
+  }
+
+  // If Submit was opened with blanks, Go Back takes the user directly
+  // to the first unanswered question.
+  const handleGoBackFromSubmit = () => {
+    setShowConfirm(false)
+    const firstUnanswered = questions.findIndex((_, index) => !progress.answers[index])
+    if (firstUnanswered !== -1) {
+      onNavigate(firstUnanswered)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
-      <div className="bg-white border-b border-slate-100 px-4 pt-safe-top pb-3 sticky top-0 z-10 shadow-sm">
+      <div className="bg-white border-b border-slate-100 px-4 pt-safe-top pb-3 sticky top-0 z-20 shadow-sm">
         <div className="max-w-lg mx-auto">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 pr-1">
             <div>
               <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
                 Physical Science LET {progress.year}
@@ -285,8 +332,43 @@ function QuizScreen({
         </div>
       </div>
 
+      {/* Scrollable question-number navigator — fixed at the top-right */}
+      <div
+        ref={questionNavRef}
+        className="fixed top-20 right-3 z-30 w-12 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+      >
+        <div className="py-2 text-center text-[9px] font-bold text-slate-400 uppercase tracking-wide border-b border-slate-100">
+          Q
+        </div>
+        <div className="max-h-64 overflow-y-auto overscroll-contain p-1.5 space-y-1 scrollbar-hide">
+          {questions.map((_, i) => {
+            const isCurrent = i === progress.currentQ
+            const isAnswered = !!progress.answers[i]
+
+            return (
+              <button
+                key={i}
+                ref={isCurrent ? currentQuestionButtonRef : undefined}
+                onClick={() => onNavigate(i)}
+                aria-label={`Go to question ${i + 1}`}
+                aria-current={isCurrent ? 'step' : undefined}
+                className={`w-9 h-9 flex-shrink-0 rounded-lg text-[11px] font-bold transition-all border ${
+                  isCurrent
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                    : isAnswered
+                    ? 'bg-indigo-50 text-indigo-600 border-indigo-100'
+                    : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {i + 1}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {/* Question */}
-      <div className="flex-1 px-4 py-5 max-w-lg mx-auto w-full">
+      <div className="flex-1 px-4 py-5 pr-20 sm:pr-24 max-w-lg mx-auto w-full">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 mb-4">
           <div className="flex items-center gap-2 mb-3">
             <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 text-sm font-bold flex-shrink-0">
@@ -297,14 +379,14 @@ function QuizScreen({
           <p className="text-slate-800 text-base font-medium leading-relaxed">{q.q}</p>
         </div>
 
-        {/* Choices */}
+        {/* Choices — clicking one saves the answer and advances automatically */}
         <div className="space-y-3">
           {choices.map((key) => {
             const isSelected = selected === key
             return (
               <button
                 key={key}
-                onClick={() => onAnswer(progress.currentQ, key)}
+                onClick={() => handleChoice(key)}
                 className={`w-full flex items-start gap-3.5 p-4 rounded-2xl border-2 transition-all active:scale-[0.98] text-left ${
                   isSelected
                     ? 'bg-indigo-600 border-indigo-600 shadow-lg shadow-indigo-200'
@@ -333,50 +415,18 @@ function QuizScreen({
         </div>
       </div>
 
-      {/* Bottom navigation */}
-      <div className="bg-white border-t border-slate-100 px-4 py-3 pb-safe-bottom sticky bottom-0 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
-        <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
+      {/* Bottom navigation — Back only; Next is automatic after choosing an answer */}
+      <div className="bg-white border-t border-slate-100 px-4 py-3 pb-safe-bottom sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+        <div className="max-w-lg mx-auto">
           <button
-            onClick={() => onNavigate(progress.currentQ - 1)}
+            onClick={handleBack}
             disabled={progress.currentQ === 0}
-            className="flex items-center gap-1.5 px-4 py-3 bg-slate-100 disabled:opacity-30 text-slate-700 font-semibold text-sm rounded-xl active:opacity-70 transition-opacity"
+            className="flex items-center justify-center gap-1.5 w-full px-4 py-3 bg-slate-100 disabled:opacity-30 text-slate-700 font-semibold text-sm rounded-xl active:opacity-70 transition-opacity"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
-            Prev
-          </button>
-
-          {/* Question dots - scrollable mini map */}
-          <div className="flex-1 overflow-x-auto scrollbar-hide">
-            <div className="flex gap-1.5 justify-center flex-wrap max-h-10 overflow-hidden">
-              {questions.slice(0, 30).map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => onNavigate(i)}
-                  className={`flex-shrink-0 w-6 h-6 rounded-md text-[10px] font-bold transition-all ${
-                    i === progress.currentQ
-                      ? 'bg-indigo-600 text-white'
-                      : progress.answers[i]
-                      ? 'bg-indigo-100 text-indigo-600'
-                      : 'bg-slate-100 text-slate-400'
-                  }`}
-                >
-                  {i + 1}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button
-            onClick={() => onNavigate(progress.currentQ + 1)}
-            disabled={progress.currentQ === questions.length - 1}
-            className="flex items-center gap-1.5 px-4 py-3 bg-slate-100 disabled:opacity-30 text-slate-700 font-semibold text-sm rounded-xl active:opacity-70 transition-opacity"
-          >
-            Next
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
+            Back
           </button>
         </div>
       </div>
@@ -391,7 +441,7 @@ function QuizScreen({
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => setShowConfirm(false)}
+                onClick={handleGoBackFromSubmit}
                 className="flex-1 py-3.5 bg-slate-100 text-slate-700 font-semibold text-sm rounded-xl"
               >
                 Go Back
@@ -425,14 +475,194 @@ function ResultScreen({
   const score = calcScore(questions, progress.answers)
   const total = questions.length
   const pct = Math.round((score / total) * 100)
+  const passed = pct >= 75
+
+  // A new, random celebration is selected every time the result screen opens.
+  const [animation, setAnimation] = useState(() => {
+    const passAnimations = ['confetti', 'stars', 'burst'] as const
+    const failAnimations = ['rain', 'shake', 'tumble'] as const
+    const list = passed ? passAnimations : failAnimations
+    return list[Math.floor(Math.random() * list.length)]
+  })
+  const [showAnimation, setShowAnimation] = useState(true)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShowAnimation(false), 2200)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const grade =
     pct >= 75 ? { label: 'PASSED', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', ring: 'ring-emerald-400' }
     : pct >= 50 ? { label: 'ALMOST', color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', ring: 'ring-amber-400' }
     : { label: 'KEEP STUDYING', color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', ring: 'ring-red-400' }
 
+  const passSymbols = ['✦', '★', '✧', '●', '◆', '✿', '＋', '✓']
+  const failSymbols = ['•', '×', '−', '!', '○', '↘', '×', '…']
+
   return (
     <div className="min-h-screen bg-slate-50 pb-safe-bottom">
+      {/* Original result animation — inspired by celebratory submission moments,
+          but designed specifically for this quiz. */}
+      {showAnimation && (
+        <div
+          className={`fixed inset-0 z-[100] pointer-events-none overflow-hidden ${
+            passed ? 'bg-emerald-950/10' : 'bg-red-950/10'
+          }`}
+          aria-hidden="true"
+        >
+          <style>{`
+            @keyframes pslet-pop {
+              0% { transform: translate(-50%, -50%) scale(.2) rotate(-12deg); opacity: 0; }
+              45% { transform: translate(-50%, -50%) scale(1.18) rotate(4deg); opacity: 1; }
+              75% { transform: translate(-50%, -50%) scale(.96) rotate(-2deg); opacity: 1; }
+              100% { transform: translate(-50%, -50%) scale(1) rotate(0); opacity: 0; }
+            }
+            @keyframes pslet-particle {
+              0% { transform: translate(0, 0) scale(.2) rotate(0); opacity: 0; }
+              15% { opacity: 1; }
+              100% { transform: translate(var(--dx), var(--dy)) scale(1) rotate(var(--rot)); opacity: 0; }
+            }
+            @keyframes pslet-star {
+              0% { transform: translate(-50%, -50%) scale(0) rotate(-45deg); opacity: 0; }
+              25% { transform: translate(-50%, -50%) scale(1.25) rotate(10deg); opacity: 1; }
+              100% { transform: translate(-50%, -50%) scale(.35) rotate(70deg); opacity: 0; }
+            }
+            @keyframes pslet-shake {
+              0%, 100% { transform: translate(-50%, -50%) rotate(0); }
+              15% { transform: translate(calc(-50% - 9px), -50%) rotate(-5deg); }
+              30% { transform: translate(calc(-50% + 9px), -50%) rotate(5deg); }
+              45% { transform: translate(calc(-50% - 6px), -50%) rotate(-3deg); }
+              60% { transform: translate(calc(-50% + 6px), -50%) rotate(3deg); }
+              75% { transform: translate(-50%, -50%) rotate(0); }
+            }
+            @keyframes pslet-tumble {
+              0% { transform: translate(-50%, -50%) rotate(-30deg) scale(.5); opacity: 0; }
+              30% { transform: translate(-50%, -50%) rotate(8deg) scale(1.1); opacity: 1; }
+              100% { transform: translate(-50%, -50%) rotate(35deg) scale(.7); opacity: 0; }
+            }
+            @keyframes pslet-fall {
+              0% { transform: translateY(-15vh) rotate(0); opacity: 0; }
+              20% { opacity: 1; }
+              100% { transform: translateY(115vh) rotate(220deg); opacity: 0; }
+            }
+            @keyframes pslet-ring {
+              0% { transform: translate(-50%, -50%) scale(.2); opacity: .9; }
+              100% { transform: translate(-50%, -50%) scale(2.7); opacity: 0; }
+            }
+            @keyframes pslet-glow {
+              0%, 100% { transform: translate(-50%, -50%) scale(.9); opacity: .2; }
+              50% { transform: translate(-50%, -50%) scale(1.12); opacity: .75; }
+            }
+          `}</style>
+
+          {passed ? (
+            <>
+              <div className="absolute left-1/2 top-1/2 w-44 h-44 rounded-full bg-emerald-400/20 blur-2xl"
+                style={{ animation: 'pslet-glow 1.3s ease-in-out 2' }} />
+              <div className="absolute left-1/2 top-1/2 w-24 h-24 rounded-full border-4 border-emerald-400/60"
+                style={{ animation: 'pslet-ring 1.1s ease-out .1s both' }} />
+              <div
+                className={`absolute left-1/2 top-1/2 w-32 h-32 rounded-[2rem] bg-white/95 shadow-2xl border-2 border-emerald-200 flex items-center justify-center ${
+                  animation === 'burst' ? '' : ''
+                }`}
+                style={{
+                  animation:
+                    animation === 'burst'
+                      ? 'pslet-pop 1.9s cubic-bezier(.2,.9,.25,1) both'
+                      : 'pslet-pop 1.9s cubic-bezier(.2,.9,.25,1) both',
+                }}
+              >
+                <div className="text-center">
+                  <div className="text-5xl leading-none">✓</div>
+                  <div className="mt-2 text-xs font-black tracking-[.18em] text-emerald-600">PASSED</div>
+                </div>
+              </div>
+
+              {Array.from({ length: 24 }, (_, i) => (
+                <span
+                  key={i}
+                  className="absolute left-1/2 top-1/2 text-lg font-black text-emerald-500"
+                  style={{
+                    animation: `${animation === 'stars' ? 'pslet-star' : 'pslet-particle'} ${1.1 + (i % 5) * .12}s cubic-bezier(.2,.8,.2,1) ${i * .025}s both`,
+                    '--dx': `${Math.cos((i / 24) * Math.PI * 2) * (110 + (i % 4) * 35)}px`,
+                    '--dy': `${Math.sin((i / 24) * Math.PI * 2) * (120 + (i % 5) * 30)}px`,
+                    '--rot': `${i % 2 ? 180 : -180}deg`,
+                  } as React.CSSProperties}
+                >
+                  {passSymbols[i % passSymbols.length]}
+                </span>
+              ))}
+            </>
+          ) : (
+            <>
+              <div
+                className="absolute left-1/2 top-1/2 w-36 h-36 rounded-full bg-red-400/15 blur-2xl"
+                style={{ animation: 'pslet-glow 1.3s ease-in-out 2' }}
+              />
+              <div
+                className="absolute left-1/2 top-1/2 w-24 h-24 rounded-full border-4 border-red-400/50"
+                style={{ animation: 'pslet-ring 1.1s ease-out .1s both' }}
+              />
+              <div
+                className="absolute left-1/2 top-1/2 w-32 h-32 rounded-[2rem] bg-white/95 shadow-2xl border-2 border-red-200 flex items-center justify-center"
+                style={{
+                  animation:
+                    animation === 'shake'
+                      ? 'pslet-shake 1.2s ease-in-out .15s both'
+                      : animation === 'tumble'
+                      ? 'pslet-tumble 1.9s ease-out both'
+                      : 'pslet-pop 1.9s cubic-bezier(.2,.9,.25,1) both',
+                }}
+              >
+                <div className="text-center">
+                  <div className="text-5xl leading-none">✕</div>
+                  <div className="mt-2 text-xs font-black tracking-[.15em] text-red-600">TRY AGAIN</div>
+                </div>
+              </div>
+
+              {animation === 'rain' ? (
+                Array.from({ length: 22 }, (_, i) => (
+                  <span
+                    key={i}
+                    className="absolute top-0 text-lg font-black text-red-400"
+                    style={{
+                      left: `${(i * 37) % 100}%`,
+                      animation: `pslet-fall ${1.1 + (i % 5) * .16}s ease-in ${i * .035}s both`,
+                    }}
+                  >
+                    {failSymbols[i % failSymbols.length]}
+                  </span>
+                ))
+              ) : (
+                Array.from({ length: 18 }, (_, i) => (
+                  <span
+                    key={i}
+                    className="absolute left-1/2 top-1/2 text-lg font-black text-red-400"
+                    style={{
+                      animation: `pslet-particle ${1.1 + (i % 5) * .12}s cubic-bezier(.2,.8,.2,1) ${i * .03}s both`,
+                      '--dx': `${Math.cos((i / 18) * Math.PI * 2) * (95 + (i % 4) * 30)}px`,
+                      '--dy': `${Math.sin((i / 18) * Math.PI * 2) * (100 + (i % 5) * 28)}px`,
+                      '--rot': `${i % 2 ? 160 : -160}deg`,
+                    } as React.CSSProperties}
+                  >
+                    {failSymbols[i % failSymbols.length]}
+                  </span>
+                ))
+              )}
+            </>
+          )}
+
+          <div
+            className={`absolute left-1/2 top-[calc(50%+115px)] -translate-x-1/2 whitespace-nowrap rounded-full px-4 py-2 text-sm font-bold shadow-lg ${
+              passed ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
+            }`}
+            style={{ animation: 'pslet-pop 1.9s ease-out both' }}
+          >
+            {passed ? '🎉 Great job!' : '💪 Keep practicing!'}
+          </div>
+        </div>
+      )}
+
       {/* Score card */}
       <div className={`${grade.bg} border-b ${grade.border} px-5 pt-safe-top pb-6`}>
         <div className="max-w-lg mx-auto">
