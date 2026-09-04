@@ -236,11 +236,13 @@ function QuizScreen({
   onAnswer,
   onNavigate,
   onSubmit,
+  onChangeYear,
 }: {
   progress: Progress
   onAnswer: (qIndex: number, choice: string) => void
   onNavigate: (qIndex: number) => void
   onSubmit: () => void | Promise<void>
+  onChangeYear: () => void
 }) {
   const questions = questionBank[progress.year] || []
   const q = questions[progress.currentQ]
@@ -314,16 +316,26 @@ function QuizScreen({
       {/* Header */}
       <div className="bg-white border-b border-slate-100 px-4 pt-safe-top pb-3 sticky top-0 z-20 shadow-sm">
         <div className="max-w-lg mx-auto">
-          <div className="flex items-center justify-between mb-3 pr-1">
-            <div>
+          <div className="flex items-center justify-between mb-3 pr-1 gap-3">
+            <div className="min-w-0 flex-1">
+              <button
+                onClick={onChangeYear}
+                className="flex items-center gap-1.5 text-indigo-600 text-xs font-bold mb-1.5 active:opacity-70 transition-opacity"
+                aria-label="Change year and return to year selection"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+                Change Year
+              </button>
               <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">
                 Physical Science LET {progress.year}
               </span>
-              <p className="text-slate-400 text-xs mt-0.5">{progress.name}</p>
+              <p className="text-slate-400 text-xs mt-0.5 truncate">{progress.name}</p>
             </div>
             <button
               onClick={handleSubmit}
-              className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg active:opacity-80 transition-opacity"
+              className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg active:opacity-80 transition-opacity flex-shrink-0"
             >
               Submit
             </button>
@@ -1069,6 +1081,14 @@ const handleSubmit = useCallback(async () => {
     setScreen('quiz')
   }, [])
 
+  // Return to the year-selection screen and reset the current exam.
+  // This is useful when a student accidentally starts the wrong year.
+  const handleChangeYear = useCallback(() => {
+    clearProgress()
+    setProgress(null)
+    setScreen('start')
+  }, [])
+
   const handleNewExam = useCallback(() => {
     clearProgress()
     setProgress(null)
@@ -1095,6 +1115,7 @@ const handleSubmit = useCallback(async () => {
         onAnswer={handleAnswer}
         onNavigate={handleNavigate}
         onSubmit={handleSubmit}
+        onChangeYear={handleChangeYear}
       />
     )
   }
